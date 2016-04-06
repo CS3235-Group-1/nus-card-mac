@@ -9,8 +9,6 @@
 #include <nfc/nfc.h>
 
 #include <freefare.h>
-#
-
 #include <openssl/hmac.h>
 
 #define MIFARE_CLASSIC_BLOCK_SIZE 16
