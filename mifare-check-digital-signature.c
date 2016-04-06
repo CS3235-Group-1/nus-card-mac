@@ -9,59 +9,90 @@
 #include <nfc/nfc.h>
 
 #include <freefare.h>
+#
 
-#include <openssl/sha.h>
+#include <openssl/hmac.h>
 
-typedef struct {
-	MifareClassicKey sector1keyA;
-	MifareClassicKey sector1keyB;
-	MifareClassicKey sector2keyA;
-	MifareClassicKey sector2keyB;
-} NUSkeys;
+#define MIFARE_CLASSIC_BLOCK_SIZE 16
 
-bool check_digital_signature (FreefareTag freefaretag)
+typedef enum {
+	ACTION_CHECK_MAC,
+	ACTION_WRITE_MAC
+} Action;
+
+const MifareClassicKey NUS_DEFAULT_KEY_A = {0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5};
+
+//Dummy function that returns the keys by checking the UID, should be replaced by NUS implementation
+void get_sector1keyA_from_uid (char *tag_uid, MifareClassicKey *key)
 {
-	//TODO
-	return true;
+	const MifareClassicKey KEY_A_LEON = {0x5e, 0x87, 0x98, 0xec, 0x78, 0x0c},
+		KEY_A_NICK = {0xb3, 0x69, 0x17, 0x7a, 0xa3, 0x5f},
+		KEY_A_SN = {0x31, 0x61, 0x7b, 0x53, 0x30, 0x0b};
+
+	const char *UID_LEON = "70f98a48",
+		*UID_NICK = "a68a6077",
+		*UID_SN = "a0fc8e4d";
+
+	if (0 == strncmp(tag_uid, UID_LEON, 8))
+		memcpy (key, KEY_A_LEON, 6);
+	else if (0 == strncmp(tag_uid, UID_NICK, 8))
+		memcpy (key, KEY_A_NICK, 6);
+	else if (0 == strncmp(tag_uid, UID_SN, 8))
+		memcpy (key, KEY_A_SN, 6);
+	else printf ("We don't have the key for this UID\n");
 }
 
-//DUmmy function that returns the keys by checking the UID, should be replaced by NUS implementation
-void get_keys_from_uid_from_card (FreefareTag freefaretag, NUSkeys *nuskeys)
+void usage (char *progname) 
 {
-	//MifareClassicKey keya = {0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5}; // default
-	MifareClassicKey keya = {0xb3, 0x69, 0x17, 0x7a, 0xa3, 0x5f}; // nick-staff
-	//MifareClassicKey keya = {0x5e, 0x87, 0x98, 0xec, 0x78, 0x0c}; // leon
-
-	memcpy (&nuskeys->sector1keyA, &keya, 6);
-    //TODO if-else cases to get the uid between our cards
-    // i.e. if (LEON_UID) then keya = LEON_KEY_A
+    fprintf (stderr, "\nOptions:\n");
+    fprintf (stderr, "  -c     Check the validity of the MAC\n");
+    fprintf (stderr, "  -w     Write the MAC onto an NUS card\n");
+    fprintf (stderr, "Please choose exactly one (c or w) option\n");
 }
 
-
-void usage (char *progname) {
-	//TODO if we have options
-    // one option can be inputting the key, since we don't have the lookup yet
-}
-
-int main(int argc, char *argv[])
+int main (int argc, char *argv[])
 {
     int ch;
     int error = EXIT_SUCCESS;
     nfc_device *device = NULL;
     FreefareTag *tags = NULL;
-    NUSkeys nuskeys;
+    MifareClassicKey nuskeyA;
     MifareClassicBlock data[3];
-    MifareClassicBlock signature;
     int device_count;
+    Action action;
 
-    while ((ch = getopt (argc, argv, "h")) != -1) {
-	switch (ch) {
+    //the contents of 3 blocks of NUS information
+    unsigned char card_data[3 * MIFARE_CLASSIC_BLOCK_SIZE];
+
+    const char *tag_friendly_name;
+
+    /*This is a demonstration. In practice, do not hard
+     *code keys
+     */
+    //A 256 bit key
+    unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
+
+    unsigned char mac[3 * MIFARE_CLASSIC_BLOCK_SIZE] = { 0 } ;
+    int mac_len;
+
+    //reads the first option only
+    if ((ch = getopt (argc, argv, "cwh")) != -1) {
+		switch (ch) {
+		case 'c':
+			action = ACTION_CHECK_MAC;
+			break;
+		case 'w':
+			action = ACTION_WRITE_MAC;
+			break;
 		case 'h':
-		    usage(argv[0]);
-		    exit (EXIT_SUCCESS);
 		default:
+		    usage (argv[0]);
+		    exit (EXIT_SUCCESS);
 			break;
 		}
+    } else {
+    	usage (argv[0]);
+    	exit (EXIT_SUCCESS);
     }
 
     nfc_connstring devices[1];
@@ -98,25 +129,25 @@ int main(int argc, char *argv[])
 	    }
 
 	    char *tag_uid = freefare_get_tag_uid (tags[i]);
-	    char *tag_friendly_name = freefare_get_tag_friendly_name (tags[i]);
+	    tag_friendly_name = freefare_get_tag_friendly_name (tags[i]);
 
-	    get_keys_from_uid_from_card(tags[i], &nuskeys);
+	    get_sector1keyA_from_uid (tag_uid, &nuskeyA);
 
 	    printf ("Found %s with UID %s. \n", tag_friendly_name, tag_uid);
 
 		if (mifare_classic_connect(tags[i]) < 0) {
 	    	printf ("Cannot connect to %s with UID %s. \n", tag_friendly_name, tag_uid);
             error = EXIT_FAILURE;
-            goto errorrr;
+            goto error;
 	    }
 
         printf ("Connected to card. \n");
         printf ("Attempting to authenticate... \n");
 
-	    if (mifare_classic_authenticate (tags[i], 0x07, nuskeys.sector1keyA, MFC_KEY_A) < 0) {
+	    if (mifare_classic_authenticate (tags[i], 0x07, nuskeyA, MFC_KEY_A) < 0) {
 	    	printf ("Cannot authenticate with %s with UID %s. \n", tag_friendly_name, tag_uid);
             error = EXIT_FAILURE;
-            goto errorrr;
+            goto error;
 	    }
 
         printf ("Authentication successful. \n");
@@ -127,46 +158,67 @@ int main(int argc, char *argv[])
 		    if (mifare_classic_read (tags[i], 0x04 + j, &data[j]) < 0) {
 		    	printf ("Cannot read from block %d for %s with UID %s. \n", 4+j, tag_friendly_name, tag_uid);
                 error = EXIT_FAILURE;
-			    goto errorrr;
+			    goto error;
 		    }
 	    }
 
         printf ("Data read successful. \n");
-        printf ("Checking signature... \n");
 
-	    //we propose storing a digital signature at block 12, so this reads block 12
-	    // if (mifare_classic_read (tags[i], 0x40, &signature) < 0) {
-	    // 	printf ("Cannot read from block 12 for %s with UID %s", 4+j, tag_friendly_name, tag_uid);
-		   //  free (tag_uid);
-		   //  free (tag_friendly_name);
-		   //  continue;
-	    // }
+        memcpy (card_data, data[0], MIFARE_CLASSIC_BLOCK_SIZE);
+        memcpy (&card_data[MIFARE_CLASSIC_BLOCK_SIZE], data[1], MIFARE_CLASSIC_BLOCK_SIZE);
+        memcpy (&card_data[2*MIFARE_CLASSIC_BLOCK_SIZE], data[2], MIFARE_CLASSIC_BLOCK_SIZE);
 
-        printf ("Signature check done. \n");
-        printf ("Printing results... \n");
-	    
-	    printf ("The 5th block is : \n");
-	    for (int j = 0; j < 16; j++) {
-	    	printf ("%02x ", data[0][j]);
+	    //we propose storing a message authentocation code at blocks 60 through 62, the next few lines
+	    //authenticates block 63 to write to blocks 60 through 62
+	    if (mifare_classic_authenticate (tags[i], 0x3f, NUS_DEFAULT_KEY_A, MFC_KEY_A) < 0) {
+	    	printf ("Cannot authenticate with %s with UID %s. \n", tag_friendly_name, tag_uid);
+            error = EXIT_FAILURE;
+            goto error;
 	    }
-        printf ("\n");
 
-        printf ("Results printed. \n");
+	    HMAC (EVP_sha256 (), key, 32, card_data, 3*MIFARE_CLASSIC_BLOCK_SIZE, mac, &mac_len);
 
-        errorrr:
-        if (error != EXIT_SUCCESS) {
-            printf ("Freeing tag uid pointer. \n");
-            free (tag_uid);
-            printf ("Freeing tag friendly name pointer. \n");
-            //free (tag_friendly_name);
-            // apparently this variable is not allocated by malloc,
-            // so it's inappropriate to use free() here.
-            // commenting it out so that it won't crash while running
-            printf ("Unable to free tag friendly name pointer. \n");
-        }
+	    // printf ("mac is of length %d\n", mac_len);
+
+	    // for (int j = 0; j < mac_len; j++)
+	    // 	printf ("%02x ", mac[j]);
+	    // printf ("\n");
+
+	    if (action == ACTION_WRITE_MAC) {
+		    for (int j = 0; j < 3; j++) {
+			    if (mifare_classic_write (tags[i], 0x3c + j, &mac[j * MIFARE_CLASSIC_BLOCK_SIZE]) < 0) {
+			    	printf ("Cannot write to block %d for %s with UID %s", 60+j, tag_friendly_name, tag_uid);
+				    error = EXIT_FAILURE;
+				    goto error;
+			    }
+			}
+
+			printf ("MAC written \n");
+		
+		} else if (action == ACTION_CHECK_MAC) {
+			for (int j = 0; j < 3; j++) {
+			    if (mifare_classic_read (tags[i], 0x3c + j, &data[j]) < 0) {
+			    	printf ("Cannot read from block %d for %s with UID %s. \n", 60+j, tag_friendly_name, tag_uid);
+	                error = EXIT_FAILURE;
+				    goto error;
+			    }
+		    }
+
+		    memcpy (card_data, data[0], MIFARE_CLASSIC_BLOCK_SIZE);
+	        memcpy (&card_data[MIFARE_CLASSIC_BLOCK_SIZE], data[1], MIFARE_CLASSIC_BLOCK_SIZE);
+	        memcpy (&card_data[2*MIFARE_CLASSIC_BLOCK_SIZE], data[2], MIFARE_CLASSIC_BLOCK_SIZE);
+
+	        if (0 == strncmp(mac, card_data, 3*MIFARE_CLASSIC_BLOCK_SIZE))
+	        	printf("The MAC is correct\n");
+	        else printf("The MAC is incorrect\n");
+		}
+
+
+        //the tag_uid should be freed at the end of an iteration, whether or not there is an error
+        error:
+        free (tag_uid);
+
 	}
-
-    printf ("Completed. \n");
 
 	freefare_free_tags (tags);
 	nfc_close (device);
