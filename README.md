@@ -1,18 +1,14 @@
-# nus-card-check-signature
-Checks the signature of the matric card.
+# nus-card-mac
+Checks the MAC of the matric card or writes a MAC onto a matric card
 
 Compile
 ---------
-Compile with gcc into the output file `check`. Needs the `-std=c99` param due to some shiz in the code. Also include `-lnfc` and `-lfreefare`. Don't ask why.
+Compile with gcc. Also include `-lnfc` and `-lfreefare` and `-lopenssl`
 
-`gcc mifare-check-digital-signature.c -o check -std=c99 -lnfc -lfreefare`
+`gcc mifare-check-digital-signature.c -o nus-mac -lnfc -lfreefare -lopenssl`
 
 Execute
 --------
-Then run the executable. Place the MIFARE CLASSIC 1K card on the reader first, duh. If you don't have a reader, why are you even reading this???
+Then run the executable. Place the MIFARE CLASSIC 1K card on the reader first. The options are `c` to check the validity of the MAC and `w` to write a MAC onto sector 15 of the matriculation card.
 
-`./check`
-
-Output
---------
-The output of the program should be clear enough. If it's not clear enough, you obviously didn't follow the instructions above. Too bad. Submit an issue to `/dev/null`.
+`./nus-mac -c`
