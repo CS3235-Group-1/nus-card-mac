@@ -5,7 +5,7 @@ Compile
 ---------
 Compile with gcc. Also include `-lnfc` and `-lfreefare` and `-lopenssl`
 
-`gcc mifare-check-digital-signature.c -o nus-mac -lnfc -lfreefare -lopenssl`
+`gcc mifare-nus-mac.c -o nus-mac -lnfc -lfreefare -lopenssl`
 
 Execute
 --------
